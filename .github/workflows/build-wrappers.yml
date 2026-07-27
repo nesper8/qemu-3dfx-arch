@@ -1,7 +1,7 @@
 # Default YAML
 # Line wrap recommended
 # Don't forget to change variables every QEMU update!
-name: Build Stable branch
+name: Build Wrappers
 
 on:
   - push
