@@ -1,113 +1,105 @@
-name: Build Wrappers
+# Default YAML
+# Line wrap recommended
+# Don't forget to change variables every QEMU update!
+name: Build Stable branch
 
 on:
-  push:
-  pull_request:
-  workflow_dispatch:
-
+  - push
+  - pull_request
+  - workflow_dispatch
+  
 jobs:
-  Wrappers:
-    runs-on: windows-latest
+   Wrappers:
+   
+    runs-on: windows-latest      
+     
+    steps:  
+    - name: Checkout repo
+      uses: actions/checkout@v4
+      
+    - name: Setup MSYS2
+      uses: msys2/setup-msys2@v2
+      with:
+        msystem: MINGW32
+        update: true
+        install: >-
+         base-devel
+         dos2unix
+         git
+         unzip
+         vim
+         wget
+         xorriso
+         mingw-w64-i686-autotools
+         mingw-w64-i686-binutils
+         mingw-w64-i686-gcc
+         mingw-w64-i686-tools
 
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-        with:
-          # Prevent Git on Windows runner from automatically converting LFs to CRLFs
-          config: |
-            core.autocrlf=input
+    - name: Adding optional support
+      shell: msys2 {0}
+      run:  |
+       echo "initialize submodules"
+       git submodule update --init --recursive
+       echo "Downloading watcom"
+       wget -q https://github.com/open-watcom/open-watcom-v2/releases/download/2025-01-03-Build/ow-snapshot.tar.xz
+       echo "Downloading djgpp"
+       wget -q https://github.com/andrewwutw/build-djgpp/releases/download/v3.4/djgpp-mingw-gcc1220.zip
+       mkdir watcom
+       echo "Extracting watcom"
+       tar xf ow-snapshot.tar.xz -C watcom
+       echo "Extracting djgpp"
+       unzip djgpp-mingw-gcc1220.zip
+       cp -v djgpp/i586-pc-msdosdjgpp/bin/dxe* djgpp/bin
 
-      - name: Setup MSYS2
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: MINGW32
-          update: true
-          install: >-
-            base-devel
-            dos2unix
-            git
-            unzip
-            vim
-            wget
-            xorriso
-            mingw-w64-i686-autotools
-            mingw-w64-i686-binutils
-            mingw-w64-i686-gcc
-            mingw-w64-i686-tools
+    - name: Compile wrappers
+      shell: msys2 {0}
+      run: |
+        echo "Adding Environment Variables"
+        export WATCOM=$(pwd)/watcom
+        export PATH=$WATCOM/binnt:$PATH:$WATCOM/binw:$PATH
+        export EDPATH=$WATCOM/eddat
+        export PATH=$(pwd)/djgpp/bin:$PATH
+        echo "Compiling 3dfx wrappers"
+        cd wrappers/3dfx
+        mkdir build && cd build
+        bash ../../../scripts/conf_wrapper
+        make && make clean
+        echo "Compiling Mesa wrappers"
+        cd ../../mesa
+        mkdir build && cd build
+        bash ../../../scripts/conf_wrapper
+        make all+ && make clean
+        echo "Compiling Guest Openglide"
+        cd ../../extra/openglide/
+        bash ./bootstrap
+        mkdir ../build && cd ../build
+        ../openglide/configure --disable-sdl && make
+        echo "Compilng g2xwrap"
+        cd ../g2xwrap
+        make
 
-      - name: Adding optional support
-        shell: msys2 {0}
-        run: |
-          echo "initialize submodules"
-          git submodule update --init --recursive
-          echo "Downloading watcom"
-          wget -q https://github.com/open-watcom/open-watcom-v2/releases/download/2025-01-03-Build/ow-snapshot.tar.xz
-          echo "Downloading djgpp"
-          wget -q https://github.com/andrewwutw/build-djgpp/releases/download/v3.4/djgpp-mingw-gcc1220.zip
-          mkdir -p watcom
-          echo "Extracting watcom"
-          tar xf ow-snapshot.tar.xz -C watcom
-          echo "Extracting djgpp"
-          unzip -q djgpp-mingw-gcc1220.zip
-          cp -v djgpp/i586-pc-msdosdjgpp/bin/dxe* djgpp/bin
+    - name: Installing wrappers
+      shell: msys2 {0}
+      working-directory: ./wrappers/iso
+      run: |
+       echo "Making Wrapper Disk"
+       mkdir -p wrapgl/icd wrapfx g2xwrap
+       cp -rf ../3dfx/build/*.{vxd,sys,dll,dxe,ovl,exe} ./wrapfx/
+       cp -rf ../mesa/build/*.{dll,exe} ./wrapgl/
+       cp -rf ../extra/g2xwrap/*.dll g2xwrap/
+       bash ../../scripts/sign_binary
+       cp ../texts/readme.txt readme.txt
+       cp ../../LICENSE license.txt
+       cp -rf ../texts/readme_icd.txt ../mesa/registry/*.reg wrapgl/icd
+       mv wrapgl/icd/readme_icd.txt wrapgl/icd/readme.txt
+       mv wrapgl/qmfxgl32.dll wrapgl/icd/qmfxgl32.dll
+       unix2dos commit.txt license.txt readme.txt autorun.inf open.bat wrapgl/icd/{readme.txt,*.reg}
+       cd ..
+       xorriso -as mkisofs -JR -V "VMWRAPPER-$(git log --format="%h" -n 1)" -o wrappers.iso iso
+       echo "Finished build at $(date)"
 
-      - name: Compile wrappers
-        shell: msys2 {0}
-        run: |
-          echo "Adding Environment Variables"
-          export WATCOM=$(pwd)/watcom
-          export PATH=$WATCOM/binnt:$PATH:$WATCOM/binw:$PATH
-          export EDPATH=$WATCOM/eddat
-          export PATH=$(pwd)/djgpp/bin:$PATH
-
-          echo "Fixing line endings in driver verification files"
-          dos2unix wrappers/3dfx/drv/*.shasum 2>/dev/null || true
-          dos2unix wrappers/3dfx/drv/Makefile 2>/dev/null || true
-
-          echo "Compiling 3dfx wrappers"
-          cd wrappers/3dfx
-          mkdir -p build && cd build
-          bash ../../../scripts/conf_wrapper
-          make && make clean
-
-          echo "Compiling Mesa wrappers"
-          cd ../../mesa
-          mkdir -p build && cd build
-          bash ../../../scripts/conf_wrapper
-          make all+ && make clean
-
-          echo "Compiling Guest Openglide"
-          cd ../../extra/openglide/
-          bash ./bootstrap
-          mkdir -p build && cd build
-          ../configure --disable-sdl && make
-
-          echo "Compiling g2xwrap"
-          cd ../../g2xwrap
-          make
-
-      - name: Installing wrappers
-        shell: msys2 {0}
-        working-directory: ./wrappers/iso
-        run: |
-          echo "Making Wrapper Disk"
-          mkdir -p wrapgl/icd wrapfx g2xwrap
-          cp -rf ../3dfx/build/*.{vxd,sys,dll,dxe,ovl,exe} ./wrapfx/
-          cp -rf ../mesa/build/*.{dll,exe} ./wrapgl/
-          cp -rf ../extra/g2xwrap/*.dll g2xwrap/
-          bash ../../scripts/sign_binary
-          cp ../texts/readme.txt readme.txt
-          cp ../../LICENSE license.txt
-          cp -rf ../texts/readme_icd.txt ../mesa/registry/*.reg wrapgl/icd
-          mv wrapgl/icd/readme_icd.txt wrapgl/icd/readme.txt
-          mv wrapgl/qmfxgl32.dll wrapgl/icd/qmfxgl32.dll
-          unix2dos commit.txt license.txt readme.txt autorun.inf open.bat wrapgl/icd/{readme.txt,*.reg}
-          cd ..
-          xorriso -as mkisofs -JR -V "VMWRAPPER-$(git log --format="%h" -n 1)" -o wrappers.iso iso
-          echo "Finished build at $(date)"
-
-      - name: Uploading wrappers
-        uses: actions/upload-artifact@v4
-        with:
-          name: wrappers-artifact
-          path: ./wrappers
+    - name: Uploading wrappers
+      uses: actions/upload-artifact@v4
+      with:
+        name: wrappers-artifact
+        path: ./wrappers
