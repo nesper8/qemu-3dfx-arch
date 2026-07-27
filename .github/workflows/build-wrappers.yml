@@ -12,6 +12,10 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+        with:
+          # Prevent Git on Windows runner from automatically converting LFs to CRLFs
+          config: |
+            core.autocrlf=input
 
       - name: Setup MSYS2
         uses: msys2/setup-msys2@v2
@@ -44,7 +48,7 @@ jobs:
           echo "Extracting watcom"
           tar xf ow-snapshot.tar.xz -C watcom
           echo "Extracting djgpp"
-          unzip djgpp-mingw-gcc1220.zip
+          unzip -q djgpp-mingw-gcc1220.zip
           cp -v djgpp/i586-pc-msdosdjgpp/bin/dxe* djgpp/bin
 
       - name: Compile wrappers
@@ -55,23 +59,31 @@ jobs:
           export PATH=$WATCOM/binnt:$PATH:$WATCOM/binw:$PATH
           export EDPATH=$WATCOM/eddat
           export PATH=$(pwd)/djgpp/bin:$PATH
+
+          echo "Fixing line endings in driver verification files"
+          dos2unix wrappers/3dfx/drv/*.shasum 2>/dev/null || true
+          dos2unix wrappers/3dfx/drv/Makefile 2>/dev/null || true
+
           echo "Compiling 3dfx wrappers"
           cd wrappers/3dfx
           mkdir -p build && cd build
           bash ../../../scripts/conf_wrapper
           make && make clean
+
           echo "Compiling Mesa wrappers"
           cd ../../mesa
           mkdir -p build && cd build
           bash ../../../scripts/conf_wrapper
           make all+ && make clean
+
           echo "Compiling Guest Openglide"
           cd ../../extra/openglide/
           bash ./bootstrap
           mkdir -p build && cd build
-          ../openglide/configure --disable-sdl && make
-          echo "Compilng g2xwrap"
-          cd ../g2xwrap
+          ../configure --disable-sdl && make
+
+          echo "Compiling g2xwrap"
+          cd ../../g2xwrap
           make
 
       - name: Installing wrappers
