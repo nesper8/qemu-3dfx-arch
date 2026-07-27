@@ -50,7 +50,7 @@ jobs:
 
       - name: Configure and compile QEMU
         run: |
-          mkdir build
+          mkdir -p build
           cd build
           ../qemu-10.1.0/configure \
             --target-list=i386-softmmu \
